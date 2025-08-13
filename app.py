@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 @app.get("/")
 def home():
-    return "Hello from Flask CI/CD "
+    return "Hello from Flask CI/CD hello devops "
 
 @app.get("/healthz")
 def health():
