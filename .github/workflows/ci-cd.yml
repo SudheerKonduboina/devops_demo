@@ -1,0 +1,274 @@
+# ════════════════════════════════════════════════════════════════
+# InfraWatch — GitHub Actions CI/CD Pipeline
+# ════════════════════════════════════════════════════════════════
+#
+# Pipeline Jobs (run in order, each depends on the previous):
+#
+#   [1] lint     → Code quality: Black, isort, flake8
+#   [2] test     → Automated tests with pytest
+#   [3] build    → Build + tag Docker image
+#   [4] deploy   → SSH into EC2, pull code, restart containers
+#
+# Triggers:
+#   - push to main or develop branches
+#   - pull_request targeting main
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   EC2_HOST    — Public IP or DNS of your AWS EC2 instance
+#   EC2_USER    — SSH user (typically "ubuntu" for Ubuntu AMIs)
+#   EC2_SSH_KEY — Content of your private SSH key (.pem file)
+# ════════════════════════════════════════════════════════════════
+
+name: InfraWatch CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+# Cancel in-progress runs when a new run is triggered on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  IMAGE_NAME: infrawatch
+
+jobs:
+
+  # ════════════════════════════════════════════════════════════════
+  # JOB 1: Code Quality & Linting
+  # ════════════════════════════════════════════════════════════════
+  lint:
+    name: "🔍 Lint & Format Check"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install linting tools
+        run: |
+          pip install --upgrade pip
+          pip install black==24.4.2 isort==5.13.2 flake8==7.0.0
+
+      - name: Check code formatting with Black
+        run: |
+          echo "Checking code formatting..."
+          black --check --diff infrawatch/ run.py app.py
+        # Black enforces consistent code style across the project
+
+      - name: Check import ordering with isort
+        run: |
+          echo "Checking import order..."
+          isort --check-only --diff infrawatch/ run.py app.py
+
+      - name: Lint with flake8
+        run: |
+          echo "Running flake8 linter..."
+          flake8 infrawatch/ run.py app.py \
+            --max-line-length=120 \
+            --ignore=E501,W503,E203 \
+            --exclude=__pycache__,.venv
+
+  # ════════════════════════════════════════════════════════════════
+  # JOB 2: Automated Tests
+  # ════════════════════════════════════════════════════════════════
+  test:
+    name: "🧪 Run Tests"
+    runs-on: ubuntu-latest
+    needs: lint                          # Only run if lint passes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          pytest tests/ -v --tb=short --no-header
+        env:
+          ENVIRONMENT: testing
+          FLASK_DEBUG: "false"
+          LOG_FILE: /tmp/test-infrawatch.log
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: /tmp/test-infrawatch.log
+
+  # ════════════════════════════════════════════════════════════════
+  # JOB 3: Build Docker Image
+  # ════════════════════════════════════════════════════════════════
+  build:
+    name: "🐳 Build Docker Image"
+    runs-on: ubuntu-latest
+    needs: test                          # Only build if tests pass
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        # Buildx enables advanced features: multi-platform, layer cache
+
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build \
+            --tag ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.IMAGE_NAME }}:latest \
+            --label "build.sha=${{ github.sha }}" \
+            --label "build.ref=${{ github.ref }}" \
+            .
+
+      - name: Verify image was built
+        run: |
+          docker images ${{ env.IMAGE_NAME }}
+          echo "Image size:"
+          docker image inspect ${{ env.IMAGE_NAME }}:latest \
+            --format='{{.Size}}' | \
+            awk '{printf "%.1f MB\n", $1/1024/1024}'
+
+      - name: Run quick smoke test on image
+        run: |
+          echo "Starting container for smoke test..."
+          docker run -d \
+            --name smoke-test \
+            -p 5001:5000 \
+            -e ENVIRONMENT=testing \
+            -e LOG_FILE=/app/logs/test.log \
+            ${{ env.IMAGE_NAME }}:latest
+          sleep 10
+          curl -f http://localhost:5001/healthz || \
+            (docker logs smoke-test && exit 1)
+          echo "Smoke test passed!"
+          docker stop smoke-test && docker rm smoke-test
+
+  # ════════════════════════════════════════════════════════════════
+  # JOB 4: Deploy to AWS EC2
+  # Only runs on push to main (not on PRs or develop)
+  # ════════════════════════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy to AWS EC2"
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: http://${{ secrets.EC2_HOST }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 120s
+          script: |
+            set -e
+            echo "═══════════════════════════════════════"
+            echo "  InfraWatch Deployment Started"
+            echo "  Time: $(date)"
+            echo "═══════════════════════════════════════"
+
+            # Navigate to project directory
+            cd /opt/infrawatch
+
+            # Pull latest code from GitHub
+            echo "→ Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+            echo "→ Deployed commit: $(git rev-parse --short HEAD)"
+
+            # Stop existing containers
+            echo "→ Stopping existing containers..."
+            docker compose down --remove-orphans || true
+
+            # Build new images
+            echo "→ Building Docker images..."
+            docker compose build --no-cache
+
+            # Start all services
+            echo "→ Starting services..."
+            docker compose up -d
+
+            # Wait for containers to be ready
+            echo "→ Waiting for application startup..."
+            sleep 20
+
+            echo "═══════════════════════════════════════"
+            echo "  Deployment script completed"
+            echo "═══════════════════════════════════════"
+
+      - name: Verify deployment health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            # Retry health check up to 5 times
+            MAX=5; COUNT=0
+            until curl -sf http://localhost/healthz > /dev/null; do
+              COUNT=$((COUNT + 1))
+              [ $COUNT -ge $MAX ] && echo "❌ Health check failed!" && exit 1
+              echo "Waiting for health check... ($COUNT/$MAX)"
+              sleep 5
+            done
+
+            echo "✅ Health check passed!"
+            echo ""
+            echo "=== Container Status ==="
+            docker compose -f /opt/infrawatch/docker-compose.yml ps
+            echo ""
+            echo "=== Live Health Response ==="
+            curl -s http://localhost/healthz | python3 -m json.tool
+            echo ""
+            echo "=== Disk Usage ==="
+            df -h / | tail -1
+            echo ""
+            echo "🎉 Deployment verified successfully!"
+
+      - name: Clean up old Docker resources on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "Cleaning up unused Docker resources..."
+            docker image prune -f
+            docker container prune -f
+            echo "Cleanup complete."

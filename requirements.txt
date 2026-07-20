@@ -1,3 +1,35 @@
+# ─────────────────────────────────────────────────────────────────
+# InfraWatch — Python Dependencies
+# ─────────────────────────────────────────────────────────────────
+
+# Web framework
 flask==3.0.3
+
+# Cross-Origin Resource Sharing
+flask-cors==4.0.1
+
+# Production WSGI server
 gunicorn==22.0.0
+
+# System metrics (CPU, memory, disk, network, processes)
+psutil==5.9.8
+
+# Environment variable loading from .env file
+python-dotenv==1.0.1
+
+# HTTP client (used by health_monitor.py)
+requests==2.31.0
+
+# ─── Dev / Testing ───────────────────────────────────────────────
+
+# Test framework
 pytest==8.2.1
+
+# Code formatting
+black==24.4.2
+
+# Import order enforcement
+isort==5.13.2
+
+# Style linter
+flake8==7.0.0

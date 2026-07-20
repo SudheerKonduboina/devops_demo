@@ -1,14 +1,17 @@
-from flask import Flask, jsonify
+"""
+app.py — Gunicorn compatibility alias
+======================================
+This file exists so Gunicorn can be invoked as:
+    gunicorn app:app
 
-app = Flask(__name__)
+All application logic lives in the `infrawatch/` package.
+For development, use: python run.py
+"""
 
-@app.get("/")
-def home():
-    return "Hello from Flask CI/CD  hii devops"
+from dotenv import load_dotenv
 
-@app.get("/healthz")
-def health():
-    return jsonify(status="ok")
+load_dotenv()
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+from infrawatch import create_app  # noqa: E402
+
+app = create_app()
