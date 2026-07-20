@@ -48,7 +48,7 @@
 | 12 | [🔐 Security](#-security) |
 | 13 | [📚 Documentation](#-documentation) |
 | 14 | [🔭 Future Scope](#-future-scope) |
-| 15 | [🎤 Interview Preparation](#-interview-preparation) |
+
 | 16 | [👨‍💻 About the Developer](#-about-the-developer) |
 
 ---
@@ -884,52 +884,6 @@ graph LR
     style FUTURE fill:#FF9800,color:#fff
     style ADVANCED fill:#9C27B0,color:#fff
 ```
-
----
-
-## 🎤 Interview Preparation
-
-> *Questions you WILL be asked and how to answer them.*
-
-<details>
-<summary><b>Q: "What is your project about?" (HR Round)</b></summary>
-
-**Answer:**
-> "I built InfraWatch — a REST API that monitors server health metrics like CPU, memory, and disk usage. The interesting part isn't the API itself — it's the complete DevOps pipeline around it. The code is automatically tested and deployed to AWS EC2 whenever I push to GitHub, using Docker containers managed by Nginx. I wrote automation scripts for backup, deployment, and monitoring. It demonstrates the full lifecycle: code → test → build → deploy → monitor."
-
-</details>
-
-<details>
-<summary><b>Q: "Why Docker?" (Technical Round)</b></summary>
-
-**Answer:**
-> "Docker solves the 'it works on my machine' problem. Without Docker, I'd need to manually install Python, pip, and packages on every server — and version differences cause crashes. With Docker, I build one image that runs identically in development, CI, and production. It also makes rollbacks trivial — just run the previous image version. It's the industry standard for this reason."
-
-</details>
-
-<details>
-<summary><b>Q: "Explain your CI/CD pipeline."</b></summary>
-
-**Answer:**
-> "My GitHub Actions pipeline has 4 jobs that run in sequence: First, lint checks code formatting with Black and isort. Second, pytest runs 20+ tests. Third, Docker builds the image and runs a smoke test. Finally, if we're on the main branch, it SSH-es into EC2, pulls the latest code, rebuilds containers, and verifies health. Each job is a gate — if lint fails, tests don't run. This prevents broken code from ever reaching production."
-
-</details>
-
-<details>
-<summary><b>Q: "What is Nginx doing in your project?"</b></summary>
-
-**Answer:**
-> "Nginx is a reverse proxy — it sits between the internet and Flask. Flask on its own shouldn't face the internet directly because it lacks rate limiting, security headers, and compression. Nginx handles all that. It receives requests on port 80, applies rate limiting (10 req/s per IP), compresses responses with gzip, adds security headers, and proxies requests to Flask on port 5000 inside Docker's private network."
-
-</details>
-
-<details>
-<summary><b>Q: "How did you handle secrets?"</b></summary>
-
-**Answer:**
-> "I never hardcode secrets in code or commit them to Git. All secrets go in a `.env` file that's listed in `.gitignore`. For the CI/CD pipeline, secrets like the EC2 SSH key and IP address are stored in GitHub Secrets — they're encrypted and only injected into the runner process at runtime. The `.env.example` file shows what variables are needed without containing actual values."
-
-</details>
 
 ---
 
